@@ -1,0 +1,30 @@
+# logrotate.radiator
+#
+# Logrotate example config for Radiator
+#
+# This example is designed to be used with Radiator default configuration
+# (see radiator-linux-simple-config.cfg in goodies).
+#
+# Description:
+# This logrotate configuration file rotates Radiator log files (if exist) monthly.
+# Rotated log files have date in their extension and they are compressed to save disk space.
+# 25 archived log files will be kept.
+#
+# Installation:
+# On Ubuntu/CentOS copy this file to /etc/logrotate.d/radiator
+#
+# Note that if you have logrotate 3.8.0 or newer, you might find option "dateyesterday" useful.
+#
+/var/log/radiator/authentication.log
+/var/log/radiator/accounting.log
+/var/log/radiator/radiator.log {
+    monthly
+    missingok
+    delaycompress
+    compress
+    notifempty
+    dateext
+    # New log file gets the same permissions
+    create
+    rotate 25
+}

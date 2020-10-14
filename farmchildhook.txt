@@ -1,0 +1,139 @@
+Date: Tue, 13 Oct 2015 14:45:15 +0200 (CEST)
+From: Christian Kratzer <ck-lists@cksoft.de>
+To: radiator@open.com.au
+
+Hi,
+
+I would like to contribute following snippet I use for FarmChildHook EAP environments where I have a backend radius behind HASHBALANCE or similar.
+
+The hook shows how to accomplish following:
+
+1. Add farminstance to Acctport and Authport of the base config and reopen ports.
+
+This is nice for setting up a backend with multiple ports where to point HASHBALANCE at.
+
+2. Walk over all authby in the config and hash the list of db credentials.
+
+This way you can configure multiple databases in the main config and the hook picks a differnt database for each child.
+
+The code could easily be modified to rotate the list of databases by the child number for a similar effect whilst keeping failover capability to the other databases.
+
+3. Also note the rather high number fo MaxFailedRequests in HASHBALANCE.  I saw the backends get marked bad instantly when activating this in a high load enviroment with a low number fo MaxFailedRequests.  I never quite found out why but assume this was due to interfering with in progress EAP transactions.  A value of 10 keeps the hashbalance happy until the backend really dies.  YMMW of course.
+
+Feel free to add this to the radiator goodies directory.
+
+Greetings and have fun
+Christian Kratzer
+CK Software GmbH
+
+
+How to use in the fronend:
+--------------------------
+
+     <Handler>
+ 	<AuthBy HASHBALANCE>
+ 	    FailureBackoffTime 60
+ 	    Secret mysecret
+ 	    MaxFailedRequests 10
+ 	    Retries 0
+
+ 	    <Host ::1>
+ 		AuthPort 10001
+ 		AcctPort 20001
+ 	    </Host>
+ 	    <Host ::1>
+ 		AuthPort 10002
+ 		AcctPort 20002
+ 	    </Host>
+ 	    <Host ::1>
+ 		AuthPort 10003
+ 		AcctPort 20003
+ 	    </Host>
+ 	    ...
+ 	</AuthBy>
+     </Handler>
+
+How to use in the backend:
+--------------------------
+
+     AuthPort      10000
+     AcctPort	  20000
+     FarmSize      4
+     FarmChildHook file:"%D/hooks/farmchild.hook"
+
+     <AuthBy SQL>
+ 	Identifier	SQLauth
+
+ 	DBSource        db1
+ 	DBUsername      user
+ 	DBAuth          pass
+
+ 	DBSource        db2
+ 	DBUsername      user
+ 	DBAuth          pass
+
+ 	...
+     </AuthBy>
+
+     <Handler>
+ 	AuthBy 		SQLauth
+     </Handler>
+
+
+hooks/farmchild.hook:
+---------------------
+
+
+# ------------------------------------------------------------------------
+# FarmChildHook
+# close and reopen AuthPort and AcctPort in farmchilds and adds
+# farmInstance to the port number
+# this also works correctly when farmInstance is >=10 when AuthPort
+# 100%O fails.
+#
+# AuthPort      10000
+# AcctPort
+# FarmSize      4
+# FarmChildHook file:"%D/hooks/farmchild.hook"
+#
+sub
+{
+     my $radius_server = $main::config->{radius_server};
+
+     # add farmInstance to AuthPort
+     my $authport = Radius::Util::format_special($main::config->{AuthPort});
+     if($authport) {
+         $authport=$authport + $main::farmInstance;
+         &main::log($main::LOG_INFO, "farmchild.hook: AuthPort: $authport");
+         $radius_server->{'AuthPort'} = $authport;
+     }
+
+     # add farmInstance to AcctPort
+     my $acctport = Radius::Util::format_special($main::config->{AcctPort});
+     if($acctport) {
+         $acctport=$acctport + $main::farmInstance;
+         &main::log($main::LOG_INFO, "farmchild.hook: AcctPort: $acctport");
+         $radius_server->{'AcctPort'} = $acctport;
+     }
+
+     # repoen auth and acct ports if needed
+     if($authport || $acctport) {
+         &main::log($main::LOG_INFO, "farmchild.hook: repoen ports");
+         $radius_server->close_sockets();
+         $radius_server->create_ports();
+     }
+
+     # walk over all AuthBy and Hash database credentials by farmInstance
+     foreach my $auth (@{$main::config->{AuthBy}}) {
+        my $id = $auth->{Identifier};
+        foreach my $key (qw(DBSource DBUsername DBAuth)) {
+            if ($auth->{$key}) {
+                my $database_count = @{$auth->{$key}};
+                $auth->{$key} = [ $auth->{$key}[ ($main::farmInstance-1)%$database_count ] ];
+                &main::log($main::LOG_INFO, "farmchild.hook: AuthBy: $id, $key: ".$auth->{$key}[0] );
+            }
+        }
+     }
+
+     return;
+}

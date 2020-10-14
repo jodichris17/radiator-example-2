@@ -1,0 +1,214 @@
+This document discusses NetIQ (formerly Novell) eDirectory and
+Universal Passwords. It gives installation tips and configuration
+assistance for a quick eDirectory and Radiator integration.
+
+eDirectory is an LDAP accessible user directory. It can be used to
+hold information about users, passwords, computers and other objects
+in your network. It is most often used to control access to networks of
+Windows computers.
+
+eDirectory runs on Windows, Linux and other platforms. It provides an
+LDAP (Lightweight Directory Access Protocol) server interface which
+Radiator can use to search for and find users in order to control
+dialup, wired and wireless network access.
+
+Most LDAP servers prevent direct access to users passwords via LDAP,
+so authenticating with an LDAP server in the past has meant storing a
+separate per-user password field that can be fetched by LDAP, or else
+getting the LDAP server to authenticate the password using
+ServerChecksPassword.
+
+eDirectory's Universal Passsword is a mechanism where each user has
+just one password to control access to all the systems that are
+regulated by eDirectory.
+
+Radiator can be configured to fetch the Universal Password in
+plaintext from eDirectory, and can therefore be used to authenticate
+a wide range of authentication protocols such as PAP, CHAP, MSCHAP,
+MSCHAPV2, PEAP-MSCHAP, EAP-MSCHAP, EAP-MD5 etc. This is an improvement
+over Windows Active Directory, where it is impossible to recover the
+user's plaintext password from AD via LDAP, and thereore can only be
+used with PAP and TTLS-PAP using LDAP.
+
+Thie means that Radiator can be used to authenticate almost all dialup,
+wired and wireless network access with the same password that users
+use for local machine login, providing a better 'single signon'
+environment than used to be the case.
+
+----------------------------------------------------------------------
+Configuring Radiator to connect to eDirectory from Unix
+
+Radiator running on Unix can be configured to connect using AuthBy
+LDAP2 to eDirectory running on any platform, on the same host, locally
+or remotely. It can be configured with the GetNovellUP to fetch each users
+Universal Password and there to authenticate most type of Raditor
+authentication request.
+
+Prerequisites are:
+Radiator 3.11 plus patches or later
+Net::LDAP Perl module
+IO::Socket::SSL Perl module
+Net::SSLeay Perl module
+OpenSSL 0.9.7 or later
+
+See goodies/edirectory.cfg and goodies/eap_edir_up.cfg for example
+configurations for connecting Radiator to eDirectory. We strongly
+suggest you start with one of these samples when developing your
+Radiator configuration. There is extensive documentation about each
+option in these example config files. Start with these and change them
+to suit your requirements, as they will proabably work with your system
+with very few changes.
+
+By default eDirectory only permits TLS LDAP connections, so you will
+need to configure Radiator to use TLS before it can connect to
+eDirectory, whether or not you wish to use Universal Passwords.
+
+Therefore you _must_ export the export the eDirectory LDAP server root
+certificate and convert it to PEM format as described below. You must
+then edit your Radiator configuration and set SSLCAFile to the full
+path name to your root certificate file in PEM format.
+
+You will also need to edit your config file to suit the way you
+installed and configured eDirectory: set the AuthDN and
+AuthPassword to the DN and password for your eDirectory
+administrator. You will also have to set BaseDN to the top of the LDAP
+directory tree that contains all your users.
+
+(If you do not wish to give the eDirectory administrator password out
+for use in the Radiator configuration, you can instead create a new
+user that Radiator will use to connect to eDirectory. Using iManager,
+create a new user, with a CN of, say 'radiusadmin'. Using
+Rights->Rights To Other Objects specify that radiusadmin is a Trustee
+for the container holding the users to be authenticated (the container
+could be the top level O=YOURORGNAME or any other group containing
+your users). Make sure the assigned rights of the radiusadmin trustee
+include both 'Read' and 'Write'.)
+
+You should now be able to run Radiator to connect to eDirectory:
+  radius -config goodies/edirectory.cfg -trace 4
+and use radpwtst to test authentication
+  radpwtst -noacct -user username -password userspassword
+where username and userspassword are the user and password you
+created above.
+
+If you have problems, send your configuration file and the trace level
+4 output from Radiator to paid email support or the public Radiator
+mailing list.
+
+----------------------------------------------------------------------
+Installing eDirectory
+
+These instructions are for eDirectory 8.8.8 Patch 10 with iManager
+2.7.7 Patch 10, current at 2017-04-10. The installation was done on
+64bit CentOS 7.3.
+
+In these instructions, OPEN is the tree and OSC is the context. The Admin
+username is 'admin' and their password is 'admin'. Modify these to suit your
+organisation.
+
+0. Make sure the proposed eDirectory server host you have internet access,
+   static IP address and internal and external DNS host name assigned correctly
+   (else server certificate will have wrong name and must disable cert verify
+   with SSLVerify none).
+
+   The hostname of the server must be resolvable. You may be able to
+   do this with /etc/hosts
+
+1. CentOS 7.3 requires 32 bit compatibility libraries. The installer
+   also hints installing net-snmp
+yum install glibc.i686 libstdc++.i686 net-snmp
+
+2. The NDS distribution might be in a tarball or a disk. Unpack the tarball or
+   mount the disk. cd to the distribution
+
+3. Install eDirectory 8.8.8 Patch 10:
+sh nds-install
+ndsconfig new -t OPEN -n o=OSC -a cn=admin.o=OSC
+> enter password for admin: admin
+
+4. Install iManager 2.7:
+tar zxvf iMan_27710_linux.tgz
+cd iManager/installs/linux
+sh iManagerInstallLinux.bin
+(ensure you enter the same admin.OSC from above for 'User context' and
+OPEN for 'Tree')
+
+When asked about installing plugins, use something like this for 8.8.8
+Patch 10: 6,12,14,18,22 (eDirectory plugins, certificate server,
+password management, nmas plugins, radius).
+  6 : eDirectory88 Plugins - 2.7.20161116 - eDirectory88 Plugins
+ 12 : NetIQ Certificate Server Plug-ins for iManager - 8.889.20161117 - NetIQ Certificate Management in eDirectory
+ 14 : NetIQ iManager Password Management - 10.7.20170209 - NetIQ iManager 2.7 Password Management Plug-ins
+ 18 : NMAS Plug-ins for iManager - 8.889.20161117 - Provide management of NetIQ's Modular Authentication Services in eDirectory
+ 22 : Novell Radius Plugin - 2.7.20140204 - Novell Radius Plugin functionality
+
+5. Browse to port 8443 on the eDirectory server: e.g., https://linux-no66.site:8443/nps/
+log in with the details of the Admin user you entered above: admin.OSC, admin, OPEN
+You should then be in iManager
+
+6. Extract the self-signed server Root certificate (The certificate is
+   required to connect to the TLS secured LDAP port):
+In iManager:
+Directory administration->Modify Object, browse to Security->OPEN CA, OK,
+Certificates Tab, select Self Signed Certificate, Export. Disable 'Export
+private key'. Export Format DER, Next>>, 'Save the exported certificate'. Get
+cert.der
+
+7. Convert the self-signed server Root certificate to PEM format (the format
+Radiator requires)
+openssl x509 -inform DER -outform PEM -in cert.der -text -out edirectory-root.pem
+
+8. Configure iManager and eDirectory:
+In iManager:
+Passwords->Password Policies, Sample Password Policy, check that Universal Passwords are enabled.
+ Click on universal Password tab, Configuration Options, and enable 'Allow admin to retrieve passwords', OK
+
+In iManager:
+Optional: Create an Organisation Unit for users and set the policy for
+this new OU.
+Passwords->Password Policies, Sample Password Policy
+ click on Policy Assignments tab, browse to OSC or the new OU, select
+ OK. Should see the your chosen OU in Assignments.
+ Add a user, set the password
+
+9. To configure Radiator for universal passwords and SSLCAFile
+   edirectory-root.pem from above, see the sample
+   goodies/edirectory.cfg in the Radiator distribution.
+
+----------------------------------------------------------------------
+Additional configuration notes for more NMAS methods,
+VASCO_NMAS_Method_3.4_iMan27.zip and
+novell-radius-ldap-extensions-1.1.0-3.zip
+
+There are some mildy helpful documents here:
+http://www.novell.com/documentation/edir_radius/pdfdoc/radiusadmin/radiusadmin.pdf
+http://www.novell.com/coolsolutions/assets/freeradius-edir.pdf
+
+Note: you need to see eDirectory documentation for the details. See
+Novell and Vasco configuration for the full information.
+
+10. To enable the freeradius compatible RADIUS schema:
+See eDirectory documentation
+
+11. Install more NMAS methods for various types of authentications:
+In iManager:
+NMAS->NMAS Login Methods->New browse to one of the zip files in
+nmas/NmasMethods/Novell/ in your eDirectory distribution (or in
+novell-nmas-methods.i386.rpm) which also comes with the distribution.
+rpm -Uvh novell-nmas-methods.i386.rpm
+The zip files will be installed in /opt/novell/nmas/nmasmthd/
+
+12. To install the Vasco NMAS method, download the method module
+http://www.vasco.com/large_download/Downloads/VASCO_NMAS_Method_3_4_iMan27.zip
+follow the instructions included
+
+13. Follow the instructions in radiusadmin.pdf to install
+novell-radius-ldap-extensions-1.1.0 RPM, modify and load
+radauth_ldapxtn.ldif and to restart the LDAP server.
+
+See radiusadmin.pdf for RPM download link. At the time of writing the
+RPMs were available from here:
+http://download.novell.com/protected/Summary.jsp?buildid=NqQA7-rn_ak~
+
+
+----------------------------------------------------------------------
